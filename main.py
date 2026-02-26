@@ -3,90 +3,151 @@ import re
 import requests
 from flask import jsonify
 
-# Configuration - Replace with your actual IDs or use Env Vars
+# 1. Configuration & Secrets
+# These are pulled from Google Secret Manager via your cloudbuild.yaml
 LINEAR_API_KEY = os.getenv("LINEAR_API_KEY")
-LINEAR_TEAM_ID = os.getenv("LINEAR_TEAM_ID") 
-LABEL_BUG_ID = "YOUR_BUG_LABEL_UUID"  # Find in Linear Label Settings
-LABEL_FEATURE_ID = "YOUR_FEATURE_LABEL_UUID"
+LINEAR_TEAM_ID = os.getenv("LINEAR_TEAM_ID")
+LABEL_BUG_ID = os.getenv("LABEL_BUG_ID")       # Add this to Secret Manager
+LABEL_FEATURE_ID = os.getenv("LABEL_FEATURE_ID") # Add this to Secret Manager
 
 LINEAR_URL = "https://api.linear.app/graphql"
-HEADERS = {"Authorization": LINEAR_API_KEY, "Content-Type": "application/json"}
+HEADERS = {
+    "Authorization": LINEAR_API_KEY,
+    "Content-Type": "application/json"
+}
 
 def query_linear(query, variables=None):
-    response = requests.post(LINEAR_URL, json={'query': query, 'variables': variables}, headers=HEADERS)
+    """Utility to send GraphQL requests to Linear."""
+    response = requests.post(
+        LINEAR_URL, 
+        json={'query': query, 'variables': variables}, 
+        headers=HEADERS
+    )
     return response.json()
 
 def parse_metadata(text):
-    """Simple parser for priority and labels based on keywords."""
+    """
+    Parses text for priority and labels.
+    Returns: (cleaned_text, priority_int, label_ids_list)
+    """
     priority_map = {"urgent": 1, "high": 2, "medium": 3, "low": 4}
-    found_priority = 0 # Default: No Priority
+    found_priority = 0  # Default to 'No Priority'
     found_labels = []
-
+    
     # Check for priority keywords
     for word, val in priority_map.items():
-        if word in text.lower():
+        if re.search(rf'\b{word}\b', text, re.IGNORECASE):
             found_priority = val
-            text = re.sub(word, "", text, flags=re.I).strip()
-    
+            # Strip keyword from title
+            text = re.sub(rf'\b{word}\b', '', text, flags=re.IGNORECASE).strip()
+            break # Take the first priority found
+
     # Auto-labeling logic
-    if "bug" in text.lower():
-        found_labels.append(LABEL_BUG_ID)
-    if "feat" in text.lower() or "request" in text.lower():
-        found_labels.append(LABEL_FEATURE_ID)
+    if re.search(r'\bbug\b', text, re.IGNORECASE):
+        if LABEL_BUG_ID: found_labels.append(LABEL_BUG_ID)
+        text = re.sub(r'\bbug\b', '', text, flags=re.IGNORECASE).strip()
         
+    if re.search(r'\b(feat|request|feature)\b', text, re.IGNORECASE):
+        if LABEL_FEATURE_ID: found_labels.append(LABEL_FEATURE_ID)
+        text = re.sub(r'\b(feat|request|feature)\b', '', text, flags=re.IGNORECASE).strip()
+
+    # Clean up double spaces left behind by removals
+    text = re.sub(r'\s+', ' ', text).strip()
     return text, found_priority, found_labels
 
 def handle_slash_command(event):
-    cmd_id = event['message']['slashCommand']['commandId']
-    text = event['message'].get('argumentText', '').strip()
+    """Routes the Google Chat Command ID to the correct Linear action."""
+    message = event.get('message', {})
+    slash_command = message.get('slashCommand', {})
+    command_id = slash_command.get('commandId')
+    argument_text = message.get('argumentText', '').strip()
 
-    # /new (Command ID 1)
-    if cmd_id == 1:
-        clean_title, priority, labels = parse_metadata(text)
+    # COMMAND 1: /new [Title] [Keywords]
+    if command_id == "1":
+        if not argument_text:
+            return "⚠️ Please provide a title. Example: `/new urgent bug Permit API is down`"
+        
+        clean_title, priority, labels = parse_metadata(argument_text)
+        
         mutation = """
-        mutation Create($title: String!, $teamId: String!, $priority: Int, $labelIds: [String!]) {
+        mutation CreateIssue($title: String!, $teamId: String!, $priority: Int, $labelIds: [String!]) {
           issueCreate(input: { title: $title, teamId: $teamId, priority: $priority, labelIds: $labelIds }) {
             success
-            issue { identifier url }
+            issue { identifier url title }
           }
         }
         """
-        res = query_linear(mutation, {"title": clean_title, "teamId": LINEAR_TEAM_ID, "priority": priority, "labelIds": labels})
-        issue = res['data']['issueCreate']['issue']
-        return f"🆕 Created *{issue['identifier']}*: {issue['url']}"
+        variables = {
+            "title": clean_title,
+            "teamId": LINEAR_TEAM_ID,
+            "priority": priority,
+            "labelIds": labels
+        }
+        
+        res = query_linear(mutation, variables)
+        if res.get('data', {}).get('issueCreate', {}).get('success'):
+            issue = res['data']['issueCreate']['issue']
+            return f"✅ *Created {issue['identifier']}*\n*{issue['title']}*\n{issue['url']}"
+        return "❌ Failed to create issue. Check Linear Team ID or API Key."
 
-    # /list (Command ID 2)
-    elif cmd_id == 2:
+    # COMMAND 2: /list
+    elif command_id == "2":
         query = """
-        query Issues($teamId: String!) {
-          issues(filter: { team: { id: { eq: $teamId } } }, first: 5) {
+        query ListIssues($teamId: String!) {
+          issues(filter: { team: { id: { eq: $teamId } } }, first: 5, orderBy: createdAt) {
             nodes { identifier title url }
           }
         }
         """
         res = query_linear(query, {"teamId": LINEAR_TEAM_ID})
-        issues = res['data']['issues']['nodes']
-        list_text = "*Recent Issues:*\n" + "\n".join([f"• {i['identifier']}: {i['title']}" for i in issues])
-        return list_text
+        issues = res.get('data', {}).get('issues', {}).get('nodes', [])
+        
+        if not issues:
+            return "No recent issues found for your team."
+            
+        list_output = "*Recent Permittable Issues:*\n"
+        for i in issues:
+            list_output += f"• <{i['url']}|{i['identifier']}>: {i['title']}\n"
+        return list_output
 
-    # /update (Command ID 3) - Format: /update [ID] [New Title]
-    elif cmd_id == 3:
-        parts = text.split(" ", 1)
-        if len(parts) < 2: return "Usage: /update ENG-123 New Title"
+    # COMMAND 3: /update [ID] [New Title]
+    elif command_id == "3":
+        # Split into [ID] and [Remainder]
+        parts = argument_text.split(" ", 1)
+        if len(parts) < 2:
+            return "⚠️ Usage: `/update ENG-123 New better title`"
+        
+        issue_id = parts[0].upper()
+        new_title = parts[1]
         
         mutation = """
-        mutation Update($id: String!, $title: String!) {
-          issueUpdate(id: $id, input: { title: $title }) { success }
+        mutation UpdateIssue($id: String!, $title: String!) {
+          issueUpdate(id: $id, input: { title: $title }) {
+            success
+          }
         }
         """
-        query_linear(mutation, {"id": parts[0].upper(), "title": parts[1]})
-        return f"✅ Updated {parts[0].upper()}"
+        res = query_linear(mutation, {"id": issue_id, "title": new_title})
+        if res.get('data', {}).get('issueUpdate', {}).get('success'):
+            return f"✅ Updated title for *{issue_id}*."
+        return f"❌ Could not find or update issue *{issue_id}*."
 
-    return "Unknown command."
+    return "I'm not sure how to handle that command yet."
 
 def main(request):
-    event = request.get_json()
-    if event.get('type') == 'MESSAGE' and 'slashCommand' in event['message']:
-        reply = handle_slash_command(event)
-        return jsonify({"text": reply})
-    return jsonify({"text": "Ready to help!"})
+    """Entry point for Google Cloud Function."""
+    # Handle the incoming Google Chat JSON
+    if request.method != 'POST':
+        return "Only POST requests accepted", 405
+        
+    event = request.get_json(silent=True)
+    if not event:
+        return "No JSON payload found", 400
+
+    # Logic: If it's a message containing a slash command, process it.
+    if event.get('type') == 'MESSAGE' and 'slashCommand' in event.get('message', {}):
+        reply_text = handle_slash_command(event)
+        return jsonify({"text": reply_text})
+
+    # Default fallback for @mentions without slash commands
+    return jsonify({"text": "Hello! Try using `/new`, `/list`, or `/update`."})
