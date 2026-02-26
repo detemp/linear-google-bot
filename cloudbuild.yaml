@@ -1,0 +1,21 @@
+steps:
+  # Step 1: Deploy the code to Google Cloud Functions
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    args:
+      - 'gcloud'
+      - 'functions'
+      - 'deploy'
+      - 'linear-chat-plugin'        # This must match your Function name in GCP
+      - '--runtime=python312'
+      - '--region=us-west1'         # Use your chosen region
+      - '--source=.'
+      - '--entry-point=main'        # The name of the function in your main.py
+      - '--trigger-http'
+      - '--allow-unauthenticated'   # Optional, but easiest for bot setup
+    env:
+      # These tell Cloud Build where to find your secrets if you use Secret Manager
+      - 'LINEAR_API_KEY=secrets/LINEAR_KEY_VERSION' 
+      - 'LINEAR_TEAM_ID=secrets/LINEAR_TEAM_VERSION'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
