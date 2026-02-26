@@ -1,0 +1,17 @@
+# Ignore Git metadata
+.git
+.gitignore
+
+# Ignore Python local environment and caches
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+
+# Ignore OS-specific files
+.DS_Store
+
+# Ignore gcloud-specific files (to avoid recursion)
+.gcloudignore
