@@ -11,7 +11,6 @@ steps:
       - '--source=.'
       - '--entry-point=main'        # The name of the function in your main.py
       - '--trigger-http'
-      - '--allow-unauthenticated'   # Optional, but easiest for bot setup
       - '--set-secrets=LINEAR_API_KEY=LINEAR_API_KEY:latest,LINEAR_TEAM_ID=LINEAR_TEAM_ID:latest'
     env:
       # These tell Cloud Build where to find your secrets if you use Secret Manager
