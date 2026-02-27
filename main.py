@@ -1,15 +1,13 @@
 import os
-import json
 import re
 import requests
 from flask import jsonify
 
 # 1. Configuration & Secrets
-# These are pulled from Google Secret Manager via your cloudbuild.yaml
 LINEAR_API_KEY = os.getenv("LINEAR_API_KEY")
 LINEAR_TEAM_ID = os.getenv("LINEAR_TEAM_ID")
-LABEL_BUG_ID = os.getenv("LABEL_BUG_ID")       # Add this to Secret Manager
-LABEL_FEATURE_ID = os.getenv("LABEL_FEATURE_ID") # Add this to Secret Manager
+LABEL_BUG_ID = os.getenv("LABEL_BUG_ID")       
+LABEL_FEATURE_ID = os.getenv("LABEL_FEATURE_ID") 
 
 LINEAR_URL = "https://api.linear.app/graphql"
 HEADERS = {
@@ -27,21 +25,17 @@ def query_linear(query, variables=None):
     return response.json()
 
 def parse_metadata(text):
-    """
-    Parses text for priority and labels.
-    Returns: (cleaned_text, priority_int, label_ids_list)
-    """
+    """Parses text for priority and labels."""
     priority_map = {"urgent": 1, "high": 2, "medium": 3, "low": 4}
-    found_priority = 0  # Default to 'No Priority'
+    found_priority = 0  
     found_labels = []
     
     # Check for priority keywords
     for word, val in priority_map.items():
         if re.search(rf'\b{word}\b', text, re.IGNORECASE):
             found_priority = val
-            # Strip keyword from title
             text = re.sub(rf'\b{word}\b', '', text, flags=re.IGNORECASE).strip()
-            break # Take the first priority found
+            break 
 
     # Auto-labeling logic
     if re.search(r'\bbug\b', text, re.IGNORECASE):
@@ -52,7 +46,6 @@ def parse_metadata(text):
         if LABEL_FEATURE_ID: found_labels.append(LABEL_FEATURE_ID)
         text = re.sub(r'\b(feat|request|feature)\b', '', text, flags=re.IGNORECASE).strip()
 
-    # Clean up double spaces left behind by removals
     text = re.sub(r'\s+', ' ', text).strip()
     return text, found_priority, found_labels
 
@@ -60,20 +53,22 @@ def handle_slash_command(event):
     """Routes the Google Chat Command ID to the correct Linear action."""
     message = event.get('message', {})
     
-    # Grab the text in case it was typed manually without the popup
     raw_text = message.get('text', '').strip()
     argument_text = message.get('argumentText', '').strip()
     
-    # Safely get the command ID
+    # THE FLOAT FIX: Google sends 1.0, we need "1"
     slash_command = message.get('slashCommand', {})
-    command_id = str(slash_command.get('commandId', ''))
+    raw_cmd_id = slash_command.get('commandId')
+    
+    if raw_cmd_id is not None:
+        command_id = str(int(float(raw_cmd_id))) # Converts 1.0 -> 1 -> "1"
+    else:
+        command_id = ""
 
-    # MANUAL OVERRIDE: If no command_id was sent, parse the raw text
+    # MANUAL OVERRIDE
     if not command_id:
-        # Using 'in' instead of 'startswith' to bypass invisible @mentions
         if '/new' in raw_text:
             command_id = "1"
-            # Extract everything after '/new'
             parts = raw_text.split('/new', 1)
             argument_text = parts[1].strip() if len(parts) > 1 else ""
         elif '/list' in raw_text:
@@ -166,16 +161,19 @@ def main(request):
     if not event:
         return "No JSON payload found", 400
 
-    chat_data = event.get('chat', event)
-
-    # Let's see if our logic catches it normally
-    if 'message' in chat_data:
-        reply_text = handle_slash_command(chat_data)
+    # THE PAYLOAD FIX: Find exactly where Google hid the data
+    if 'appCommandPayload' in event:
+        event_data = event['appCommandPayload']
+    elif 'chat' in event:
+        event_data = event['chat']
     else:
-        # --- PAYLOAD DUMP ---
-        # If it skips our logic, we print exactly what Google sent us
-        payload_str = json.dumps(chat_data, indent=2)
-        reply_text = f"🛠️ **PAYLOAD REVEAL** 🛠️\nHere is the raw data Google sent:\n```json\n{payload_str}\n```"
+        event_data = event
+
+    # Now we know we are looking at the right level
+    if 'message' in event_data:
+        reply_text = handle_slash_command(event_data)
+    else:
+        reply_text = "Hello! Try using `/new`, `/list`, or `/update`."
 
     return jsonify({
         "hostAppDataAction": {
