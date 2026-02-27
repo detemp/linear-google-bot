@@ -161,18 +161,17 @@ def main(request):
     if not event:
         return "No JSON payload found", 400
 
-    # THE PAYLOAD FIX: Find exactly where Google hid the data
-    if 'appCommandPayload' in event:
-        event_data = event['appCommandPayload']
-    elif 'chat' in event:
-        event_data = event['chat']
-    else:
-        event_data = event
+    # 1. Unwrap the Add-on 'chat' wrapper
+    chat_data = event.get('chat', event)
+    
+    # 2. Unwrap the Slash Command 'appCommandPayload' wrapper
+    event_data = chat_data.get('appCommandPayload', chat_data)
 
-    # Now we know we are looking at the right level
+    # 3. NOW we can finally see the message object!
     if 'message' in event_data:
         reply_text = handle_slash_command(event_data)
     else:
+        # Fallback if someone just pings the bot without a valid command
         reply_text = "Hello! Try using `/new`, `/list`, or `/update`."
 
     return jsonify({
