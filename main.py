@@ -63,20 +63,24 @@ def handle_slash_command(event):
     raw_text = message.get('text', '').strip()
     argument_text = message.get('argumentText', '').strip()
     
-    # Safely get the command ID (fixes the int vs str bug)
+    # Safely get the command ID
     slash_command = message.get('slashCommand', {})
     command_id = str(slash_command.get('commandId', ''))
 
     # MANUAL OVERRIDE: If no command_id was sent, parse the raw text
     if not command_id:
-        if raw_text.startswith('/new'):
+        # Using 'in' instead of 'startswith' to bypass invisible @mentions
+        if '/new' in raw_text:
             command_id = "1"
-            argument_text = raw_text.replace('/new', '', 1).strip()
-        elif raw_text.startswith('/list'):
+            # Extract everything after '/new'
+            parts = raw_text.split('/new', 1)
+            argument_text = parts[1].strip() if len(parts) > 1 else ""
+        elif '/list' in raw_text:
             command_id = "2"
-        elif raw_text.startswith('/update'):
+        elif '/update' in raw_text:
             command_id = "3"
-            argument_text = raw_text.replace('/update', '', 1).strip()
+            parts = raw_text.split('/update', 1)
+            argument_text = parts[1].strip() if len(parts) > 1 else ""
         else:
             return "I'm not sure how to handle that command yet."
 
@@ -151,6 +155,7 @@ def handle_slash_command(event):
 
     return "I'm not sure how to handle that command yet."
 
+
 def main(request):
     """Entry point for Google Cloud Function / Cloud Run."""
     if request.method != 'POST':
@@ -160,9 +165,13 @@ def main(request):
     if not event:
         return "No JSON payload found", 400
 
-    # If there is a message object, process it (skipping the strict slashCommand check)
-    if 'message' in event:
-        reply_text = handle_slash_command(event)
+    # Workspace Add-ons nest the Chat event inside a 'chat' object. 
+    # This safely un-nests it.
+    chat_data = event.get('chat', event)
+
+    # Now we can properly check for the message
+    if 'message' in chat_data:
+        reply_text = handle_slash_command(chat_data)
     else:
         # Fallback for configuration pings or space joins
         reply_text = "Hello! Try using `/new`, `/list`, or `/update`."
@@ -175,6 +184,9 @@ def main(request):
                         "text": reply_text
                     }
                 }
+            }
+        }
+    })
             }
         }
     })
