@@ -110,7 +110,6 @@ def handle_slash_command(event):
 
     # COMMAND 2: /list
     elif command_id == "2":
-        # Fetching the last 5 ensures we see the newest additions to the tail of the list
         query = """
         query ListIssues($teamId: String!) {
           issues(filter: { team: { id: { eq: $teamId } } }, last: 5) {
@@ -122,11 +121,13 @@ def handle_slash_command(event):
         issues = res.get('data', {}).get('issues', {}).get('nodes', [])
         
         if not issues:
-            return "No recent issues found for your team."
+            # --- LINEAR DEBUG DUMP ---
+            import json
+            raw_linear = json.dumps(res, indent=2)
+            return f"🛠️ **LINEAR DEBUG** 🛠️\nNo issues parsed. Raw response from Linear:\n```json\n{raw_linear}\n```"
+            # -------------------------
             
         list_output = "*Recent Permittable Issues:*\n"
-        
-        # Reverse the list so the absolute newest shows at the top of the chat message
         for i in reversed(issues):
             list_output += f"• <{i['url']}|{i['identifier']}>: {i['title']}\n"
         return list_output
