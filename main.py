@@ -136,7 +136,6 @@ def handle_slash_command(event):
 
 def main(request):
     """Entry point for Google Cloud Function."""
-    # Handle the incoming Google Chat JSON
     if request.method != 'POST':
         return "Only POST requests accepted", 405
         
@@ -144,10 +143,19 @@ def main(request):
     if not event:
         return "No JSON payload found", 400
 
-    # Logic: If it's a message containing a slash command, process it.
+    # Process Slash Commands
     if event.get('type') == 'MESSAGE' and 'slashCommand' in event.get('message', {}):
         reply_text = handle_slash_command(event)
-        return jsonify({"text": reply_text})
+        
+        # Use a structure that works for Workspace Add-ons & Chat
+        return jsonify({
+            "actionResponse": {
+                "type": "NEW_MESSAGE"
+            },
+            "text": reply_text
+        })
 
-    # Default fallback for @mentions without slash commands
-    return jsonify({"text": "Hello! Try using `/new`, `/list`, or `/update`."})
+    # Default fallback
+    return jsonify({
+        "text": "Hello! Try using `/new`, `/list`, or `/update`."
+    })
