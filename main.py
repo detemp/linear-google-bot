@@ -1,4 +1,5 @@
 import os
+import json
 import re
 import requests
 from flask import jsonify
@@ -165,21 +166,16 @@ def main(request):
     if not event:
         return "No JSON payload found", 400
 
-    # Try our previous un-nesting logic
     chat_data = event.get('chat', event)
 
+    # Let's see if our logic catches it normally
     if 'message' in chat_data:
         reply_text = handle_slash_command(chat_data)
     else:
-        # --- DEBUG INJECTION ---
-        top_keys = list(event.keys())
-        reply_text = f"🛠️ **DEBUG MODE** 🛠️\nThe `message` key wasn't found in the expected place.\n**Top-level payload keys:** {top_keys}"
-        
-        # Hunt for where Google might be hiding the message object
-        hiding_places = [k for k, v in event.items() if isinstance(v, dict) and 'message' in v]
-        if hiding_places:
-            reply_text += f"\n**Found `message` nested inside:** {hiding_places}"
-        # -----------------------
+        # --- PAYLOAD DUMP ---
+        # If it skips our logic, we print exactly what Google sent us
+        payload_str = json.dumps(chat_data, indent=2)
+        reply_text = f"🛠️ **PAYLOAD REVEAL** 🛠️\nHere is the raw data Google sent:\n```json\n{payload_str}\n```"
 
     return jsonify({
         "hostAppDataAction": {
