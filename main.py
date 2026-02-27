@@ -58,9 +58,27 @@ def parse_metadata(text):
 def handle_slash_command(event):
     """Routes the Google Chat Command ID to the correct Linear action."""
     message = event.get('message', {})
-    slash_command = message.get('slashCommand', {})
-    command_id = slash_command.get('commandId')
+    
+    # Grab the text in case it was typed manually without the popup
+    raw_text = message.get('text', '').strip()
     argument_text = message.get('argumentText', '').strip()
+    
+    # Safely get the command ID (fixes the int vs str bug)
+    slash_command = message.get('slashCommand', {})
+    command_id = str(slash_command.get('commandId', ''))
+
+    # MANUAL OVERRIDE: If no command_id was sent, parse the raw text
+    if not command_id:
+        if raw_text.startswith('/new'):
+            command_id = "1"
+            argument_text = raw_text.replace('/new', '', 1).strip()
+        elif raw_text.startswith('/list'):
+            command_id = "2"
+        elif raw_text.startswith('/update'):
+            command_id = "3"
+            argument_text = raw_text.replace('/update', '', 1).strip()
+        else:
+            return "I'm not sure how to handle that command yet."
 
     # COMMAND 1: /new [Title] [Keywords]
     if command_id == "1":
@@ -112,7 +130,6 @@ def handle_slash_command(event):
 
     # COMMAND 3: /update [ID] [New Title]
     elif command_id == "3":
-        # Split into [ID] and [Remainder]
         parts = argument_text.split(" ", 1)
         if len(parts) < 2:
             return "⚠️ Usage: `/update ENG-123 New better title`"
@@ -136,7 +153,6 @@ def handle_slash_command(event):
 
 def main(request):
     """Entry point for Google Cloud Function / Cloud Run."""
-    # Handle the incoming Google Chat JSON
     if request.method != 'POST':
         return "Only POST requests accepted", 405
         
@@ -144,30 +160,19 @@ def main(request):
     if not event:
         return "No JSON payload found", 400
 
-    # Logic: If it's a message containing a slash command, process it.
-    if event.get('type') == 'MESSAGE' and 'slashCommand' in event.get('message', {}):
+    # If there is a message object, process it (skipping the strict slashCommand check)
+    if 'message' in event:
         reply_text = handle_slash_command(event)
-        
-        # The specific JSON wrapper required for Workspace Add-ons
-        return jsonify({
-            "hostAppDataAction": {
-                "chatDataAction": {
-                    "createMessageAction": {
-                        "message": {
-                            "text": reply_text
-                        }
-                    }
-                }
-            }
-        })
+    else:
+        # Fallback for configuration pings or space joins
+        reply_text = "Hello! Try using `/new`, `/list`, or `/update`."
 
-    # Default fallback for @mentions without slash commands
     return jsonify({
         "hostAppDataAction": {
             "chatDataAction": {
                 "createMessageAction": {
                     "message": {
-                        "text": "Hello! Try using `/new`, `/list`, or `/update`."
+                        "text": reply_text
                     }
                 }
             }
