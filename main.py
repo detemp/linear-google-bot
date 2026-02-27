@@ -64,7 +64,6 @@ def handle_slash_command(event):
 
     # COMMAND 1: /new [Title] [Keywords]
     if command_id == "1":
-        return {"text": "The backend is alive! This is a test."}
         if not argument_text:
             return "⚠️ Please provide a title. Example: `/new urgent bug Permit API is down`"
         
