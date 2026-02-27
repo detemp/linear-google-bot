@@ -110,9 +110,10 @@ def handle_slash_command(event):
 
     # COMMAND 2: /list
     elif command_id == "2":
+        # Fetching the last 5 ensures we see the newest additions to the tail of the list
         query = """
         query ListIssues($teamId: String!) {
-          issues(filter: { team: { id: { eq: $teamId } } }, first: 5, orderBy: createdAt) {
+          issues(filter: { team: { id: { eq: $teamId } } }, last: 5) {
             nodes { identifier title url }
           }
         }
@@ -124,10 +125,12 @@ def handle_slash_command(event):
             return "No recent issues found for your team."
             
         list_output = "*Recent Permittable Issues:*\n"
-        for i in issues:
+        
+        # Reverse the list so the absolute newest shows at the top of the chat message
+        for i in reversed(issues):
             list_output += f"• <{i['url']}|{i['identifier']}>: {i['title']}\n"
         return list_output
-
+    
     # COMMAND 3: /update [ID] [New Title]
     elif command_id == "3":
         parts = argument_text.split(" ", 1)
