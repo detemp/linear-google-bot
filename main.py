@@ -110,9 +110,10 @@ def handle_slash_command(event):
 
     # COMMAND 2: /list
     elif command_id == "2":
+        # The fix: $teamId is now declared as an ID! instead of String!
         query = """
-        query ListIssues($teamId: String!) {
-          issues(filter: { team: { id: { eq: $teamId } } }, last: 5) {
+        query ListIssues($teamId: ID!) {
+          issues(filter: { team: { id: { eq: $teamId } } }, first: 5) {
             nodes { identifier title url }
           }
         }
@@ -121,14 +122,10 @@ def handle_slash_command(event):
         issues = res.get('data', {}).get('issues', {}).get('nodes', [])
         
         if not issues:
-            # --- LINEAR DEBUG DUMP ---
-            import json
-            raw_linear = json.dumps(res, indent=2)
-            return f"🛠️ **LINEAR DEBUG** 🛠️\nNo issues parsed. Raw response from Linear:\n```json\n{raw_linear}\n```"
-            # -------------------------
+            return "No recent issues found for your team."
             
         list_output = "*Recent Permittable Issues:*\n"
-        for i in reversed(issues):
+        for i in issues:
             list_output += f"• <{i['url']}|{i['identifier']}>: {i['title']}\n"
         return list_output
     
