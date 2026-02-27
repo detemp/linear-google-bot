@@ -165,16 +165,21 @@ def main(request):
     if not event:
         return "No JSON payload found", 400
 
-    # Workspace Add-ons nest the Chat event inside a 'chat' object. 
-    # This safely un-nests it.
+    # Try our previous un-nesting logic
     chat_data = event.get('chat', event)
 
-    # Now we can properly check for the message
     if 'message' in chat_data:
         reply_text = handle_slash_command(chat_data)
     else:
-        # Fallback for configuration pings or space joins
-        reply_text = "Hello! Try using `/new`, `/list`, or `/update`."
+        # --- DEBUG INJECTION ---
+        top_keys = list(event.keys())
+        reply_text = f"🛠️ **DEBUG MODE** 🛠️\nThe `message` key wasn't found in the expected place.\n**Top-level payload keys:** {top_keys}"
+        
+        # Hunt for where Google might be hiding the message object
+        hiding_places = [k for k, v in event.items() if isinstance(v, dict) and 'message' in v]
+        if hiding_places:
+            reply_text += f"\n**Found `message` nested inside:** {hiding_places}"
+        # -----------------------
 
     return jsonify({
         "hostAppDataAction": {
